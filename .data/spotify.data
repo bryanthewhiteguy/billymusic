@@ -1,0 +1,11 @@
+{
+    "client_id": "63d80b806f894409890b15011925101e",
+    "client_secret": "9967b71e65e64182921b7647b2907f28",
+    "redirect_url": "http://localhost:8888/callback",
+    "access_token": "BQBU7cSZBe6BnF3yJiIAfgQdGiMRi0wleSjbA43ShDmTdRFCqd8zDT3W0jai2p1tkDDpX9DIMKsiTqxtTdc2lqDZmsZQRK8LQtcUsuE0edyokG6qN9RIUOpDp87lIPLcdyLFTQM2AoStAQczybYoVTPXLhUBPgF7SA",
+    "refresh_token": "AQDEBCv3P30pb_9CTydaBKYyMF_QD7I7YhK8gACcJOu55PAQqVikkdH7ccxdis-YjhMgpjUZcTrFt7o0irK3v_ohGMVQmVYTToYDUpL8SSEvgUwfGS1ShqvQTX2GlJQzEFc",
+    "expires_in": 3600,
+    "expiry": 1642356447733,
+    "token_type": "Bearer",
+    "market": "US"
+}
