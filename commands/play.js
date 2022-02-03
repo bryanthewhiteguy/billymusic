@@ -15,13 +15,20 @@ async function play(msg, theVC) {
 
     Player[msg.guild.id] = player;
 
-    const connection = await connectToChannel(theVC, msg);
+    let connection;
+
+    connection = servers[msg.guild.id].connection == null ? await connectToChannel(theVC, msg) : servers[msg.guild.id].connection;
 
     connection.subscribe(player);
 
-    let resource = await getSong(servers[msg.guild.id].queue[0].query, msg);
+    servers[msg.guild.id].connection = connection;
 
-    if (resource === null) return;
+    let resource = await getSong(servers[msg.guild.id].queue[0], msg);
+
+    if (resource === null) {
+        servers[msg.guild.id].queue.shift();
+        return;
+    }
 
     player.play(resource, { volume: 1.0 });
 
@@ -32,24 +39,37 @@ async function play(msg, theVC) {
                 servers[msg.guild.id].queue.unshift(servers[msg.guild.id].previousQueue[0]);
                 servers[msg.guild.id].previousQueue.shift();
             } else {
-                if (!servers[msg.guild.id].loop && !servers[msg.guild.id].playNow) {
+                if ((!servers[msg.guild.id].loop || servers[msg.guild.id].skipping) && !servers[msg.guild.id].playNow) {
                     servers[msg.guild.id].previousQueue.unshift(servers[msg.guild.id].queue[0]);
                     servers[msg.guild.id].queue.shift();
                 }
             }
         }
 
+        servers[msg.guild.id].skipping = false;
         servers[msg.guild.id].previous = false;
         servers[msg.guild.id].playNow = false;
 
+        if (servers[msg.guild.id].queueing) {
+            while (servers[msg.guild.id].queueing) {
+                setTimeout(() => {
+                    console.log("waiting");
+                }, 100);
+            }
+        }
+
         if (servers[msg.guild.id].queue.length === 0) {
+
+            servers[msg.guild.id].connection = null;
             connection.destroy();
             player.removeAllListeners("stateChange");
             player = null;
 
             return;
         } else {
-            let nextSong = await getSong(servers[msg.guild.id].queue[0].query, msg);
+            let nextSong = await getSong(servers[msg.guild.id].queue[0], msg);
+
+            if (nextSong === null) return;
 
             player.play(nextSong, { volume: 1.0 });
         }
@@ -73,10 +93,9 @@ async function connectToChannel(channel, msg) {
     }
 }
 
-async function getSong(query, msg) {
+async function getSong(song, msg) {
     try {
-        console.log(query);
-        const stream = await pdl.stream(`${query}`, { seek: servers[msg.guild.id].seek !== null ? servers[msg.guild.id].seek : 0 });
+        const stream = await pdl.stream(`${song.query}`, { seek: servers[msg.guild.id].seek !== null ? servers[msg.guild.id].seek : song.seek });
         const resource = createAudioResource(stream.stream, { inputType: stream.type });
 
         servers[msg.guild.id].resource = resource;
@@ -88,7 +107,18 @@ async function getSong(query, msg) {
         console.log(e)
         Player[msg.guild.id].stop();
         msg.channel.send("An error occured while trying to play your song. Song possibly removed or age restricted.");
-        return null;
+
+        servers[msg.guild.id].queue.shift();
+
+        if (servers[msg.guild.id].queue.length === 0) {
+            servers[msg.guild.id].connection.destroy();
+            servers[msg.guild.id].connection = null;
+            Player[msg.guild.id].removeAllListeners("stateChange");
+            Player[msg.guild.id] = null;
+            return null;
+        }
+
+        return getSong(servers[msg.guild.id].queue[0], msg);
     }
 }
 
@@ -110,14 +140,19 @@ async function processQuery(msg, args, client, exampleMessage, billyID) {
     if (!servers[msg.guild.id]) servers[msg.guild.id] = {
         queue: [],
         previousQueue: [],
+        skipping: false,
+        queueing: false,
         previous: false,
-        playNoq: false,
+        playNow: false,
         seek: null,
         loop: false,
+        connection: null,
         resource: null
     }
 
     const isURL = args[1].toLowerCase().startsWith("https://") ? true : false;
+
+    servers[msg.guild.id].queueing = true;
 
     try {
         if (isURL) {
@@ -142,12 +177,16 @@ async function processQuery(msg, args, client, exampleMessage, billyID) {
                             time = v.durationRaw;
                             url = v.url;
 
+                            servers[msg.guild.id].queueing = false;
+
                             sendQuery(url, title, time, true);
 
                         })
 
                         return;
                     } catch (e) {
+                        servers[msg.guild.id].queueing = false;
+
                         return msg.channel.send("An error occured while trying to play your playlist. Some songs are possibly removed or age restricted.");
                     }
                 } else if (youtubeLink === "video") {
@@ -159,6 +198,8 @@ async function processQuery(msg, args, client, exampleMessage, billyID) {
                     time = urlInfo.video_details.durationRaw;
 
                 } else {
+                    servers[msg.guild.id].queueing = false;
+
                     return msg.channel.send("An error occured while trying to play your song.");
                 }
             } else if (spotifyLink && query.startsWith("https://")) {
@@ -174,6 +215,8 @@ async function processQuery(msg, args, client, exampleMessage, billyID) {
                             url = firstVideo.url;
                             time = firstVideo.timestamp;
                             title = firstVideo.title;
+
+                            servers[msg.guild.id].queueing = false;
 
                             sendQuery(url, title, time, true);
                         })
@@ -191,13 +234,19 @@ async function processQuery(msg, args, client, exampleMessage, billyID) {
                         time = firstVideo.timestamp;
                         title = firstVideo.title;
 
+                        servers[msg.guild.id].queueing = false;
+
                         sendQuery(url, title, time, true);
                     })
                     return;
                 } else {
+                    servers[msg.guild.id].queueing = false;
+
                     return msg.channel.send("An error occured while trying to play your song.");
                 }
             } else {
+                servers[msg.guild.id].queueing = false;
+
                 return msg.channel.send("An error occured while trying to play your song.");
             }
         } else {
@@ -210,8 +259,11 @@ async function processQuery(msg, args, client, exampleMessage, billyID) {
         }
     } catch (e) {
         console.log(e)
+        servers[msg.guild.id].queueing = false;
         return msg.channel.send("An error occured while trying to play your song.");
     }
+
+    servers[msg.guild.id].queueing = false;
 
     sendQuery(url, title, time);
 
@@ -234,12 +286,16 @@ async function processQuery(msg, args, client, exampleMessage, billyID) {
         if (servers[msg.guild.id].queue.length === 0) {
             msg.channel.send(`Now playing **${title}** - \`(${time})\``);
 
-            servers[msg.guild.id].queue.push({ author: msg.member, query: query, title: title, time: time })
+            servers[msg.guild.id].queue.push({ author: msg.member, query: query, title: title, time: time, seek: 0 })
 
             play(msg, theVC);
         } else {
             if (servers[msg.guild.id].playNow) {
-                servers[msg.guild.id].queue.unshift({ author: msg.member, query: query, title: title, time: time })
+                servers[msg.guild.id].queue.unshift({ author: msg.member, query: query, title: title, time: time, seek: 0 })
+
+                if (servers[msg.guild.id].queue.length >= 2) {
+                    servers[msg.guild.id].queue[1].seek = servers[msg.guild.id].resource.playbackDuration / 1000;
+                }
 
                 msg.channel.send(`Now playing **${title}** - \`(${time})\``);
 
@@ -247,8 +303,10 @@ async function processQuery(msg, args, client, exampleMessage, billyID) {
             } else {
                 if (!playlistSong) msg.channel.send(`Queued **${title}** - \`(${time})\``);
 
-                servers[msg.guild.id].queue.push({ author: msg.member, query: query, title: title, time: time })
+                servers[msg.guild.id].queue.push({ author: msg.member, query: query, title: title, time: time, seek: 0 })
             }
+
+            servers[msg.guild.id].connection.rejoin();
         }
     }
 }
